@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>WILLIE — number bag</title>
+<style>
+  :root{
+    --ink:#100e0c;
+    --wall:#1d1a15;
+    --chalk:#f2ece0;
+    --chalk-dim:#a49b8a;
+    --leather:#7a2b26;
+    --ochre:#c9a227;
+    --blood:#a8342c;
+    --stencil: "Haettenschweiler","Arial Narrow Bold","Impact","Arial Narrow",system-ui,sans-serif;
+    --body: ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--ink);color:var(--chalk);font-family:var(--body)}
+  canvas{display:block}
+  #app{position:fixed;inset:0}
+
+  /* ---------- HUD ---------- */
+  .hud{position:fixed;pointer-events:none;z-index:10}
+  #topbar{top:0;left:0;right:0;padding:calc(env(safe-area-inset-top) + 10px) 12px 10px;
+    display:flex;align-items:baseline;gap:14px;
+    background:linear-gradient(180deg,rgba(16,14,12,.85),rgba(16,14,12,0))}
+  #score{font-family:var(--stencil);font-size:34px;letter-spacing:.02em;line-height:1}
+  #streak{font-size:12px;color:var(--chalk-dim)}
+  #drillname{margin-left:auto;font-size:13px;color:var(--chalk-dim);text-align:right;max-width:45vw}
+
+  #callrow{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 74px);
+    display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding:0 10px;z-index:10;pointer-events:none}
+  .chip{font-family:var(--stencil);font-size:30px;width:48px;height:56px;line-height:56px;text-align:center;
+    color:#5c5346;border:2px solid #322c24;border-radius:4px;background:rgba(0,0,0,.35);
+    transition:transform .12s ease,color .12s,border-color .12s,background .12s}
+  .chip.done{color:var(--chalk-dim);border-color:#4a4235;background:rgba(0,0,0,.2)}
+  .chip.now{color:var(--ink);background:var(--ochre);border-color:var(--ochre);transform:translateY(-6px) scale(1.08)}
+  .chip.hidden{color:transparent;text-shadow:none}
+  .chip.hidden.now{color:var(--ink)}
+
+  #bottombar{position:fixed;bottom:0;left:0;right:0;z-index:11;
+    padding:10px 12px calc(env(safe-area-inset-bottom) + 12px);
+    display:flex;gap:8px;justify-content:center;
+    background:linear-gradient(0deg,rgba(16,14,12,.9),rgba(16,14,12,0))}
+  button{font-family:var(--body);font-size:14px;font-weight:600;color:var(--chalk);
+    background:#26221c;border:1px solid #3d372d;border-radius:3px;padding:11px 15px;cursor:pointer}
+  button:active{transform:translateY(1px)}
+  button:focus-visible{outline:2px solid var(--ochre);outline-offset:2px}
+  button.primary{background:var(--blood);border-color:#c9463c}
+  button[disabled]{opacity:.4}
+
+  /* ---------- panel ---------- */
+  #panel{position:fixed;inset:0;z-index:20;background:rgba(12,10,9,.96);
+    overflow-y:auto;padding:24px 20px calc(env(safe-area-inset-bottom) + 24px);display:none}
+  #panel.open{display:block}
+  #panel h1{font-family:var(--stencil);font-size:44px;margin:6px 0 2px;letter-spacing:.01em}
+  #panel .sub{color:var(--chalk-dim);font-size:14px;margin:0 0 22px;max-width:46ch;line-height:1.5}
+  #panel h2{font-size:13px;font-weight:700;color:var(--ochre);margin:26px 0 10px;letter-spacing:.06em}
+  .drill{display:flex;align-items:center;gap:12px;width:100%;text-align:left;margin-bottom:6px;
+    background:#1b1813;border:1px solid #2e2921;padding:12px 14px}
+  .drill .seq{font-family:var(--stencil);font-size:26px;color:var(--ochre);min-width:118px;letter-spacing:.06em}
+  .drill .lab{font-size:13px;color:var(--chalk-dim)}
+  .keytable{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:14px;color:var(--chalk-dim);
+    max-width:34ch;line-height:1.45}
+  .keytable b{font-family:var(--stencil);font-size:22px;color:var(--chalk);font-weight:400}
+  .row{display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap}
+  input[type=text]{flex:1;min-width:180px;background:#1b1813;border:1px solid #3d372d;color:var(--chalk);
+    padding:11px 12px;font-family:var(--stencil);font-size:22px;letter-spacing:.08em;border-radius:3px}
+  label.toggle{display:flex;gap:10px;align-items:center;font-size:14px;color:var(--chalk-dim);margin:10px 0}
+  input[type=checkbox]{width:20px;height:20px;accent-color:var(--ochre)}
+  .note{font-size:12px;color:#6f6759;line-height:1.5;max-width:46ch;margin-top:8px}
+
+  /* ---------- game over ---------- */
+  #over{position:fixed;inset:0;z-index:30;display:none;flex-direction:column;
+    align-items:center;justify-content:center;gap:6px;background:rgba(80,14,10,.9);text-align:center;padding:24px}
+  #over.open{display:flex}
+  #over .big{font-family:var(--stencil);font-size:76px;line-height:.9;color:#fff}
+  #over .why{font-size:16px;color:#ffd9d4;max-width:32ch;line-height:1.5}
+  #over .why b{font-family:var(--stencil);font-size:26px;font-weight:400}
+  #over .final{font-size:14px;color:#ffb9b1;margin-top:8px}
+  #over button{margin-top:18px;background:#fff;color:#7a2b26;border-color:#fff;font-size:16px;padding:14px 26px}
+
+  #flash{position:fixed;inset:0;z-index:9;pointer-events:none;opacity:0;background:#fff;transition:opacity .18s}
+  #hint{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 140px);text-align:center;
+    font-size:13px;color:var(--chalk-dim);z-index:10;pointer-events:none;transition:opacity .4s}
+  @media (prefers-reduced-motion: reduce){.chip{transition:none}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div class="hud" id="topbar">
+  <div id="score">0</div>
+  <div id="streak">no streak</div>
+  <div id="drillname">—</div>
+</div>
+
+<div id="callrow"></div>
+<div id="hint">Tap the number that's lit. No clock — take as long as you need.</div>
+
+<div id="bottombar">
+  <button id="btnMenu">Drills</button>
+  <button id="btnRestart">Restart combo</button>
+  <button id="btnVR" class="primary">Enter VR</button>
+</div>
+
+<div id="panel">
+  <h1>WILLIE</h1>
+  <p class="sub">A number bag. Cus D'Amato called numbers, the fighter threw punches. Same idea here: one punch is lit, you throw it. Wrong punch ends the round. There is no timer — this is for learning slow.</p>
+
+  <h2>The numbers</h2>
+  <div class="keytable" id="keytable"></div>
+
+  <h2>Drills</h2>
+  <div id="drills"></div>
+
+  <h2>Your own combo</h2>
+  <div class="row">
+    <input type="text" id="custom" placeholder="7-7-5-1-2-1" inputmode="numeric">
+    <button id="btnCustom">Load</button>
+  </div>
+  <p class="note">Digits 1–8, any separator. Saved combos last until you reload the page.</p>
+  <div id="saved"></div>
+
+  <h2>Settings</h2>
+  <label class="toggle"><input type="checkbox" id="optCall" checked> Call the number out loud</label>
+  <label class="toggle"><input type="checkbox" id="optBlind"> Hide the numbers (go off the voice)</label>
+  <label class="toggle"><input type="checkbox" id="optHands" checked> In VR, check which hand throws it</label>
+  <label class="toggle"><input type="checkbox" id="optSouth"> Southpaw (swap left/right)</label>
+
+  <div class="row" style="margin-top:26px">
+    <button class="primary" id="btnClose">Back to the bag</button>
+  </div>
+  <p class="note">Numbering follows the Catskill / peek-a-boo system as it's commonly published. Gyms vary — if yours numbers differently, load your own combos and read the chart as labels, not gospel.</p>
+</div>
+
+<div id="over">
+  <div class="big">ROUND OVER</div>
+  <div class="why" id="overWhy"></div>
+  <div class="final" id="overFinal"></div>
+  <button id="btnAgain">Run it again</button>
+</div>
+
+<div id="flash"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* =========================================================
+   1. THE SYSTEM
+   ========================================================= */
+const PUNCH = {
+  1:{label:"Left hook to the head", hand:"L", value:30, weight:1.00, body:false},
+  2:{label:"Right hand to the head", hand:"R", value:35, weight:1.10, body:false},
+  3:{label:"Left uppercut",         hand:"L", value:30, weight:1.00, body:false},
+  4:{label:"Right uppercut",        hand:"R", value:35, weight:1.10, body:false},
+  5:{label:"Left hook to the body", hand:"L", value:25, weight:0.95, body:true},
+  6:{label:"Right hook to the body",hand:"R", value:30, weight:1.05, body:true},
+  7:{label:"Jab to the head",       hand:"L", value:15, weight:0.70, body:false},
+  8:{label:"Jab to the body",       hand:"L", value:15, weight:0.70, body:true}
+};
+
+// theta = angle around the bag from dead centre (+ is the puncher's right), y = height on the bag
+const ZONES = [
+  {n:1, theta:-36, y: 0.46},
+  {n:7, theta:  0, y: 0.46},
+  {n:2, theta: 36, y: 0.46},
+  {n:3, theta:-18, y: 0.18},
+  {n:4, theta: 18, y: 0.18},
+  {n:5, theta:-36, y:-0.24},
+  {n:8, theta:  0, y:-0.24},
+  {n:6, theta: 36, y:-0.24}
+];
+
+const DRILLS = [
+  {name:"Jab, right hand",        seq:[7,2]},
+  {name:"Double jab, right hand", seq:[7,7,2]},
+  {name:"Right hand, left hook",  seq:[2,1]},
+  {name:"Uppercut turn",          seq:[3,2,1]},
+  {name:"Body then upstairs",     seq:[5,1,2]},
+  {name:"Hook chain",             seq:[1,2,1,2]},
+  {name:"Invest in the body",     seq:[8,6,1,2]},
+  {name:"The six",                seq:[7,7,5,1,2,1]},
+  {name:"Long eight",             seq:[7,5,3,2,1,6,4,2]}
+];
+
+/* =========================================================
+   2. GAME STATE
+   ========================================================= */
+const S = {
+  seq:[7,2], name:"Jab, right hand", idx:0,
+  score:0, streak:0, best:0, alive:true,
+  call:true, blind:false, checkHands:true, southpaw:false,
+  saved:[]
+};
+
+/* =========================================================
+   3. SOUND — procedural, no files
+   ========================================================= */
+let AC=null, noiseBuf=null, master=null;
+function audio(){
+  if(AC) return AC;
+  AC = new (window.AudioContext||window.webkitAudioContext)();
+  master = AC.createGain(); master.gain.value=0.9; master.connect(AC.destination);
+  const len = AC.sampleRate*1.2;
+  noiseBuf = AC.createBuffer(1,len,AC.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+  return AC;
+}
+function noise(dur,type,freq,q,gain,delay){
+  const t = AC.currentTime + (delay||0);
+  const s = AC.createBufferSource(); s.buffer=noiseBuf; s.loop=true;
+  const f = AC.createBiquadFilter(); f.type=type; f.frequency.value=freq; f.Q.value=q||1;
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0,t);
+  g.gain.linearRampToValueAtTime(gain,t+0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  s.connect(f); f.connect(g); g.connect(master);
+  s.start(t); s.stop(t+dur+0.05);
+}
+function tone(freq,to,dur,gain,type,delay){
+  const t = AC.currentTime + (delay||0);
+  const o = AC.createOscillator(); o.type=type||"sine";
+  o.frequency.setValueAtTime(freq,t);
+  if(to) o.frequency.exponentialRampToValueAtTime(to,t+dur);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0,t);
+  g.gain.linearRampToValueAtTime(gain,t+0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g); g.connect(master);
+  o.start(t); o.stop(t+dur+0.05);
+}
+function chain(){ // the swivel rattling after a shot
+  for(let i=0;i<5;i++) noise(0.05,"bandpass",2600+Math.random()*2600,9,0.05,0.06+Math.random()*0.35);
+}
+function sfxHit(n){
+  audio();
+  const p = PUNCH[n], w = p.weight;
+  noise(0.09,"highpass",1400,0.7,0.10);                     // glove through air
+  noise(0.16*w,"lowpass", p.body?520:900, 1, 0.55*w, 0.03); // leather thud
+  noise(0.05,"bandpass", p.body?900:1900, 5, 0.22, 0.03);   // surface crack
+  tone(p.body?58:82,(p.body?34:44),0.30*w,0.55*w,"sine",0.03); // sub
+  chain();
+}
+function sfxWhiff(){ audio(); noise(0.13,"lowpass",300,1,0.18); chain(); }
+function sfxWrong(){
+  audio();
+  tone(150,44,0.55,0.35,"sawtooth");
+  noise(0.35,"lowpass",420,1,0.3);
+}
+function sfxDone(){
+  audio();
+  tone(660,null,0.9,0.22,"sine");
+  tone(990,null,1.1,0.14,"sine",0.02);
+  tone(1320,null,0.7,0.07,"sine",0.05);
+}
+function say(n){
+  if(!S.call) return;
+  try{
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(String(n));
+    u.rate = 1.0; u.pitch = 0.75; u.volume = 1;
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+
+/* =========================================================
+   4. SCENE
+   ========================================================= */
+const app = document.getElementById("app");
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType("local-floor");
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d0b0a);
+scene.fog = new THREE.Fog(0x0d0b0a, 3.2, 11);
+
+const camera = new THREE.PerspectiveCamera(62, innerWidth/innerHeight, 0.05, 60);
+camera.position.set(0,1.6,0);
+camera.lookAt(0,1.25,-0.9);
+const camRig = new THREE.Group();
+camRig.add(camera);
+scene.add(camRig);
+
+// --- room
+const floorMat = new THREE.MeshStandardMaterial({color:0x2a2118, roughness:0.95, metalness:0});
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(14,14), floorMat);
+floor.rotation.x = -Math.PI/2;
+scene.add(floor);
+
+const wallMat = new THREE.MeshStandardMaterial({color:0x24291f, roughness:1});
+function wall(w,h,x,y,z,ry){
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w,h), wallMat);
+  m.position.set(x,y,z); m.rotation.y = ry||0; scene.add(m); return m;
+}
+wall(14,4.2,0,2.1,-5.4);
+wall(14,4.2,0,2.1,5.4,Math.PI);
+wall(10.8,4.2,-7,2.1,0,Math.PI/2);
+wall(10.8,4.2,7,2.1,0,-Math.PI/2);
+const ceil = new THREE.Mesh(new THREE.PlaneGeometry(14,14), new THREE.MeshStandardMaterial({color:0x15130f,roughness:1}));
+ceil.rotation.x = Math.PI/2; ceil.position.y = 4.2; scene.add(ceil);
+
+// --- light
+scene.add(new THREE.AmbientLight(0x40382c, 0.55));
+const key = new THREE.SpotLight(0xfff0d0, 1.5, 12, 0.62, 0.55, 1.2);
+key.position.set(0.6, 3.9, 0.5); key.target.position.set(0,1.25,-0.9);
+scene.add(key); scene.add(key.target);
+const rim = new THREE.DirectionalLight(0x7fa0c0, 0.35);
+rim.position.set(-3,2.4,-4); scene.add(rim);
+
+/* --- the bag, hung from a pivot so it can swing --- */
+const PIVOT_Y = 3.1, BAG_Z = -0.9, BAG_CY = 1.24, R = 0.28, HALF = 0.70;
+const pivot = new THREE.Group();
+pivot.position.set(0, PIVOT_Y, BAG_Z);
+scene.add(pivot);
+
+const leather = new THREE.MeshStandardMaterial({color:0x6d2622, roughness:0.62, metalness:0.06});
+const bag = new THREE.Group();
+bag.position.y = BAG_CY - PIVOT_Y;
+pivot.add(bag);
+
+const body = new THREE.Mesh(new THREE.CylinderGeometry(R,R,HALF*2,28,1,true), leather);
+bag.add(body);
+const capTop = new THREE.Mesh(new THREE.SphereGeometry(R,24,12,0,Math.PI*2,0,Math.PI/2), leather);
+capTop.position.y = HALF; bag.add(capTop);
+const capBot = new THREE.Mesh(new THREE.SphereGeometry(R,24,12,0,Math.PI*2,Math.PI/2,Math.PI/2), leather);
+capBot.position.y = -HALF; bag.add(capBot);
+// stitched seam bands
+const bandMat = new THREE.MeshStandardMaterial({color:0x4a1a17, roughness:0.8});
+[HALF-0.05,-HALF+0.05].forEach(y=>{
+  const b = new THREE.Mesh(new THREE.CylinderGeometry(R+0.007,R+0.007,0.045,28,1,true), bandMat);
+  b.position.y=y; bag.add(b);
+});
+// chain
+const chainMat = new THREE.MeshStandardMaterial({color:0x6a6a70, roughness:0.45, metalness:0.85});
+const chainH = PIVOT_Y - (BAG_CY + HALF);
+const chainMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.016,0.016,chainH,8), chainMat);
+chainMesh.position.y = -chainH/2; pivot.add(chainMesh);
+const swivel = new THREE.Mesh(new THREE.TorusGeometry(0.05,0.014,8,16), chainMat);
+swivel.position.y = -chainH; swivel.rotation.x = Math.PI/2; pivot.add(swivel);
+
+/* --- numbered zones --- */
+function zoneTexture(n, state){
+  const c = document.createElement("canvas"); c.width=c.height=256;
+  const g = c.getContext("2d");
+  g.clearRect(0,0,256,256);
+  const fill = state==="now" ? "#c9a227" : (state==="done" ? "#4c4438" : "#1a1613");
+  g.beginPath(); g.arc(128,128,116,0,Math.PI*2);
+  g.fillStyle = fill; g.globalAlpha = state==="now" ? 0.95 : 0.62; g.fill(); g.globalAlpha=1;
+  g.lineWidth = state==="now" ? 14 : 8;
+  g.strokeStyle = state==="now" ? "#fff3cf" : "#8d8371";
+  g.stroke();
+  g.fillStyle = state==="now" ? "#191510" : "#efe7d6";
+  g.font = "700 175px Haettenschweiler, 'Arial Narrow Bold', Impact, sans-serif";
+  g.textAlign="center"; g.textBaseline="middle";
+  g.fillText(String(n),128,140);
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = 4;
+  return t;
+}
+const zoneMeshes = [];
+ZONES.forEach(z=>{
+  const th = THREE.MathUtils.degToRad(z.theta);
+  const nx = Math.sin(th), nz = Math.cos(th);
+  const geo = new THREE.CircleGeometry(0.082, 28);
+  const mat = new THREE.MeshBasicMaterial({map:zoneTexture(z.n,"idle"), transparent:true, depthWrite:false});
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(nx*(R+0.018), z.y, nz*(R+0.018));
+  m.lookAt(m.position.clone().add(new THREE.Vector3(nx,0,nz)));
+  m.userData = {n:z.n, normal:new THREE.Vector3(nx,0,nz), state:"idle"};
+  bag.add(m);
+  zoneMeshes.push(m);
+});
+function setZoneState(n, state){
+  const m = zoneMeshes.find(z=>z.userData.n===n);
+  if(!m || m.userData.state===state) return;
+  m.userData.state = state;
+  m.material.map.dispose();
+  m.material.map = zoneTexture(n, state);
+  m.material.needsUpdate = true;
+}
+function refreshZones(){
+  zoneMeshes.forEach(m=>{
+    const want = (S.alive && S.seq[S.idx]===m.userData.n && !S.blind) ? "now" : "idle";
+    setZoneState(m.userData.n, want);
+  });
+}
+
+/* --- 3D readout panel (what you see in VR) --- */
+const panelCanvas = document.createElement("canvas");
+panelCanvas.width = 1024; panelCanvas.height = 288;
+const pctx = panelCanvas.getContext("2d");
+const panelTex = new THREE.CanvasTexture(panelCanvas);
+const panelMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(1.7,0.478),
+  new THREE.MeshBasicMaterial({map:panelTex, transparent:true})
+);
+panelMesh.position.set(0, 2.28, BAG_Z-0.05);
+panelMesh.rotation.x = -0.16;
+scene.add(panelMesh);
+
+function drawPanel(msg){
+  const g = pctx;
+  g.clearRect(0,0,1024,288);
+  g.fillStyle = "rgba(14,12,10,.88)"; g.fillRect(0,0,1024,288);
+  g.strokeStyle = "#3a342a"; g.lineWidth=4; g.strokeRect(2,2,1020,284);
+
+  g.fillStyle = "#efe7d6";
+  g.font = "700 62px Haettenschweiler, 'Arial Narrow Bold', Impact, sans-serif";
+  g.textAlign="left"; g.textBaseline="alphabetic";
+  g.fillText(String(S.score), 26, 74);
+  g.fillStyle = "#8d8371"; g.font = "22px sans-serif";
+  g.fillText(S.streak>1 ? (S.streak+" clean") : "", 26, 104);
+  g.textAlign="right"; g.fillText(S.name, 998, 74);
+
+  if(msg){
+    g.textAlign="center"; g.fillStyle="#ff8b7f";
+    g.font = "700 74px Haettenschweiler, 'Arial Narrow Bold', Impact, sans-serif";
+    g.fillText(msg, 512, 210);
+  } else {
+    const n = S.seq.length, w = Math.min(112, 940/Math.max(n,1)), gap = w*0.14;
+    const total = n*w + (n-1)*gap, x0 = 512 - total/2;
+    for(let i=0;i<n;i++){
+      const x = x0 + i*(w+gap), y = 132, h = w*1.16;
+      const cur = i===S.idx, done = i<S.idx;
+      g.fillStyle = cur ? "#c9a227" : (done ? "rgba(80,72,58,.5)" : "rgba(0,0,0,.35)");
+      g.fillRect(x,y,w,h);
+      g.strokeStyle = cur ? "#f7e6a0" : "#3f382d"; g.lineWidth = cur?5:3;
+      g.strokeRect(x,y,w,h);
+      g.fillStyle = cur ? "#191510" : (done ? "#8d8371" : "#5c5346");
+      g.font = "700 "+Math.floor(w*0.86)+"px Haettenschweiler, 'Arial Narrow Bold', Impact, sans-serif";
+      g.textAlign="center"; g.textBaseline="middle";
+      const shown = (S.blind && !done && !cur) ? "" : S.seq[i];
+      g.fillText(String(shown), x+w/2, y+h/2+3);
+    }
+  }
+  panelTex.needsUpdate = true;
+}
+
+/* --- floating score pops in 3D --- */
+const pops = [];
+function pop(text, worldPos, color){
+  const c = document.createElement("canvas"); c.width=256; c.height=128;
+  const g = c.getContext("2d");
+  g.font="700 88px Haettenschweiler,'Arial Narrow Bold',Impact,sans-serif";
+  g.textAlign="center"; g.textBaseline="middle"; g.fillStyle=color||"#c9a227";
+  g.fillText(text,128,68);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c), transparent:true, depthTest:false}));
+  sp.position.copy(worldPos); sp.scale.set(0.34,0.17,1);
+  scene.add(sp);
+  pops.push({sp, t:0});
+}
+
+/* =========================================================
+   5. SWING PHYSICS
+   ========================================================= */
+const swing = {ax:0, az:0, vx:0, vz:0};
+function impulse(dir, force){
+  swing.vx +=  dir.z * force;   // pushed away from the puncher -> rotate about X
+  swing.vz += -dir.x * force;
+}
+function stepSwing(dt){
+  const k = 26, damp = 2.4;
+  swing.vx += (-k*swing.ax - damp*swing.vx)*dt;
+  swing.vz += (-k*swing.az - damp*swing.vz)*dt;
+  swing.ax += swing.vx*dt;
+  swing.az += swing.vz*dt;
+  pivot.rotation.x = swing.ax;
+  pivot.rotation.z = swing.az;
+}
+
+/* =========================================================
+   6. GAME LOGIC
+   ========================================================= */
+const el = id => document.getElementById(id);
+const callrow = el("callrow");
+
+function renderCall(){
+  callrow.innerHTML = "";
+  S.seq.forEach((n,i)=>{
+    const d = document.createElement("div");
+    d.className = "chip" + (i<S.idx?" done":"") + (i===S.idx&&S.alive?" now":"") + (S.blind&&i!==S.idx?" hidden":"");
+    d.textContent = n;
+    callrow.appendChild(d);
+  });
+  el("score").textContent = S.score;
+  el("streak").textContent = S.streak>1 ? (S.streak+" clean in a row") : "no streak";
+  el("drillname").textContent = S.name;
+  refreshZones();
+  drawPanel(S.alive?null:"OUT");
+}
+
+function loadCombo(seq, name){
+  S.seq = seq.slice(); S.name = name || seq.join("-");
+  S.idx = 0; S.alive = true;
+  el("over").classList.remove("open");
+  renderCall();
+  say(S.seq[0]);
+  hideHintSoon();
+}
+
+function correct(n, worldPos, normal){
+  const p = PUNCH[n];
+  const mult = 1 + Math.min(S.streak,20)*0.05;
+  const gain = Math.round(p.value * mult);
+  S.score += gain; S.streak++; S.best = Math.max(S.best,S.streak);
+  sfxHit(n);
+  impulse(normal, 1.9*p.weight);
+  pop("+"+gain, worldPos, "#f2e3a8");
+  S.idx++;
+  if(S.idx >= S.seq.length){
+    const bonus = 20*S.seq.length;
+    S.score += bonus;
+    sfxDone();
+    setTimeout(()=>{ pop("COMBO +"+bonus, new THREE.Vector3(0,1.9,BAG_Z+0.4), "#ffffff"); },120);
+    setTimeout(()=>{ S.idx=0; renderCall(); say(S.seq[0]); }, 900);
+    renderCall();
+  } else {
+    renderCall();
+    say(S.seq[S.idx]);
+  }
+}
+
+function fail(reason){
+  S.alive = false; S.streak = 0;
+  sfxWrong();
+  const f = el("flash"); f.style.background="#a8342c"; f.style.opacity=".55";
+  setTimeout(()=>f.style.opacity="0",120);
+  el("overWhy").innerHTML = reason;
+  el("overFinal").textContent = "Score " + S.score + " · best run " + S.best + " clean";
+  el("over").classList.add("open");
+  refreshZones();
+  drawPanel("OUT");
+  try{ speechSynthesis.cancel(); }catch(e){}
+}
+
+function punch(n, worldPos, normal, hand){
+  if(!S.alive) return;
+  const want = S.seq[S.idx];
+  if(n !== want){
+    fail("Called <b>"+want+"</b> — "+PUNCH[want].label.toLowerCase()+".<br>You threw <b>"+n+"</b>.");
+    return;
+  }
+  if(hand && S.checkHands){
+    let need = PUNCH[n].hand;
+    if(S.southpaw) need = need==="L" ? "R" : "L";
+    if(need !== hand){
+      fail("<b>"+n+"</b> is a "+(need==="L"?"left":"right")+" hand.<br>You threw it with your "+(hand==="L"?"left":"right")+".");
+      return;
+    }
+  }
+  correct(n, worldPos, normal);
+}
+
+/* =========================================================
+   7. INPUT — pointer (mobile / desktop)
+   ========================================================= */
+const ray = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+let down = null, dragged = false, yaw = 0;
+
+function pointerHit(x,y){
+  ndc.x = (x/innerWidth)*2-1;
+  ndc.y = -(y/innerHeight)*2+1;
+  ray.setFromCamera(ndc, camera);
+  const hitZone = ray.intersectObjects(zoneMeshes, false);
+  if(hitZone.length){
+    const m = hitZone[0].object;
+    const normal = m.userData.normal.clone().applyQuaternion(pivot.quaternion);
+    punch(m.userData.n, hitZone[0].point, normal, null);
+    return;
+  }
+  const hitBag = ray.intersectObject(body,false).concat(ray.intersectObject(capTop,false));
+  if(hitBag.length){ sfxWhiff(); impulse(new THREE.Vector3(0,0,-1),0.7); }
+}
+renderer.domElement.addEventListener("pointerdown", e=>{ down={x:e.clientX,y:e.clientY}; dragged=false; audio(); });
+renderer.domElement.addEventListener("pointermove", e=>{
+  if(!down) return;
+  const dx = e.clientX-down.x, dy = e.clientY-down.y;
+  if(Math.abs(dx)+Math.abs(dy) > 14){
+    dragged = true;
+    yaw = THREE.MathUtils.clamp(yaw - dx*0.0016, -0.5, 0.5);
+    down = {x:e.clientX,y:e.clientY};
+  }
+});
+renderer.domElement.addEventListener("pointerup", e=>{
+  if(down && !dragged) pointerHit(e.clientX, e.clientY);
+  down = null;
+});
+addEventListener("keydown", e=>{
+  if(e.key>="1" && e.key<="8"){
+    audio();
+    const n = parseInt(e.key,10);
+    const m = zoneMeshes.find(z=>z.userData.n===n);
+    const wp = new THREE.Vector3(); m.getWorldPosition(wp);
+    punch(n, wp, m.userData.normal.clone().applyQuaternion(pivot.quaternion), null);
+  }
+});
+
+/* =========================================================
+   8. INPUT — VR gloves
+   ========================================================= */
+const gloves = [];
+for(let i=0;i<2;i++){
+  const g = renderer.xr.getControllerGrip(i);
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.062,16,12),
+    new THREE.MeshStandardMaterial({color:i===0?0x9d2f2a:0x2f4a9d, roughness:0.5})
+  );
+  g.add(mesh);
+  scene.add(g);
+  gloves.push({obj:g, prev:new THREE.Vector3(), vel:new THREE.Vector3(), armed:true, hand:i===0?"L":"R", init:false});
+}
+renderer.xr.addEventListener("sessionstart", ()=>{
+  audio();
+  gloves.forEach(g=>g.init=false);
+  document.body.style.background = "#000";
+});
+function stepGloves(dt){
+  const zp = new THREE.Vector3();
+  gloves.forEach(g=>{
+    const p = new THREE.Vector3(); g.obj.getWorldPosition(p);
+    if(!g.init){ g.prev.copy(p); g.init=true; return; }
+    g.vel.subVectors(p,g.prev).divideScalar(Math.max(dt,0.0001));
+    g.prev.copy(p);
+    const speed = g.vel.length();
+
+    let near = false;
+    for(const m of zoneMeshes){
+      m.getWorldPosition(zp);
+      const d = zp.distanceTo(p);
+      if(d < 0.17) near = true;
+      if(g.armed && d < 0.135 && speed > 1.1){
+        const nrm = m.userData.normal.clone().applyQuaternion(pivot.quaternion);
+        if(g.vel.dot(nrm) < -0.35){
+          g.armed = false;
+          punch(m.userData.n, zp.clone(), nrm, g.hand);
+          break;
+        }
+      }
+    }
+    if(!g.armed && !near) g.armed = true;
+  });
+}
+
+/* =========================================================
+   9. UI WIRING
+   ========================================================= */
+const keytable = el("keytable");
+Object.keys(PUNCH).forEach(k=>{
+  const b = document.createElement("b"); b.textContent = k;
+  const s = document.createElement("span"); s.textContent = PUNCH[k].label;
+  keytable.appendChild(b); keytable.appendChild(s);
+});
+const drillsEl = el("drills");
+DRILLS.forEach(d=>{
+  const btn = document.createElement("button");
+  btn.className = "drill";
+  btn.innerHTML = '<span class="seq">'+d.seq.join("-")+'</span><span class="lab">'+d.name+'</span>';
+  btn.onclick = ()=>{ loadCombo(d.seq, d.name); closePanel(); };
+  drillsEl.appendChild(btn);
+});
+function renderSaved(){
+  const box = el("saved"); box.innerHTML = "";
+  S.saved.forEach(s=>{
+    const btn = document.createElement("button");
+    btn.className="drill";
+    btn.innerHTML = '<span class="seq">'+s.join("-")+'</span><span class="lab">yours</span>';
+    btn.onclick = ()=>{ loadCombo(s,"Your combo"); closePanel(); };
+    box.appendChild(btn);
+  });
+}
+function openPanel(){ el("panel").classList.add("open"); }
+function closePanel(){ el("panel").classList.remove("open"); }
+el("btnMenu").onclick = ()=>{ audio(); openPanel(); };
+el("btnClose").onclick = closePanel;
+el("btnRestart").onclick = ()=>{ audio(); loadCombo(S.seq, S.name); };
+el("btnAgain").onclick = ()=>{ loadCombo(S.seq, S.name); };
+el("btnCustom").onclick = ()=>{
+  const raw = el("custom").value;
+  const seq = (raw.match(/[1-8]/g)||[]).map(Number);
+  if(!seq.length){ el("custom").value=""; el("custom").placeholder="Digits 1–8 only, e.g. 7-7-5-1-2-1"; return; }
+  S.saved.unshift(seq); S.saved = S.saved.slice(0,6);
+  renderSaved();
+  el("custom").value="";
+  loadCombo(seq,"Your combo");
+  closePanel();
+};
+el("optCall").onchange = e=>{ S.call = e.target.checked; };
+el("optBlind").onchange = e=>{ S.blind = e.target.checked; renderCall(); };
+el("optHands").onchange = e=>{ S.checkHands = e.target.checked; };
+el("optSouth").onchange = e=>{ S.southpaw = e.target.checked; };
+
+const btnVR = el("btnVR");
+const framed = (function(){ try{ return window.self !== window.top; }catch(e){ return true; } })();
+
+function xrStatus(msg){ el("hint").textContent = msg; el("hint").style.opacity="1"; clearTimeout(hintTimer); }
+
+// Never disable the button on a probe result — probes lie inside frames.
+// Report the real blocker instead.
+if(!navigator.xr){
+  btnVR.textContent = framed ? "Open file directly for VR" : "No WebXR in this browser";
+} else if(navigator.xr.isSessionSupported){
+  navigator.xr.isSessionSupported("immersive-vr").then(ok=>{
+    if(!ok) btnVR.textContent = framed ? "Open file directly for VR" : "Enter VR";
+  }).catch(()=>{});
+}
+
+btnVR.onclick = ()=>{
+  audio();
+  if(!navigator.xr){
+    xrStatus(framed
+      ? "This page is running inside a frame that blocks WebXR. Download the file and open it as its own tab."
+      : "This browser has no WebXR. Use Meta Quest Browser or Wolvic.");
+    return;
+  }
+  const opts = {optionalFeatures:["local-floor","bounded-floor","hand-tracking"]};
+  navigator.xr.requestSession("immersive-vr", opts)
+    .then(s=>renderer.xr.setSession(s))
+    .catch(()=>{
+      // some builds choke on optional features — try the plainest possible request
+      return navigator.xr.requestSession("immersive-vr").then(s=>{
+        renderer.xr.setReferenceSpaceType("local");
+        renderer.xr.setSession(s);
+      });
+    })
+    .catch(err=>{
+      const m = String(err && err.message || err);
+      const proto = location.protocol;
+      if(!window.isSecureContext || proto==="file:" || proto==="content:"){
+        xrStatus("WebXR needs a secure origin. This page is on "+proto+" — serve it over https (itch.io, GitHub Pages, or a cloudflared tunnel) and open that URL.");
+      } else if(framed){
+        xrStatus("Blocked by the page's frame permissions. Open the file in its own tab and try again.");
+      } else if(/gesture|user activation/i.test(m)){
+        xrStatus("Tap the button again — the headset needs a fresh tap to start the session.");
+      } else {
+        xrStatus("VR session refused: " + m + "  (secure context: " + window.isSecureContext + ", origin: " + proto + ")");
+      }
+    });
+};
+
+let hintTimer=null;
+function hideHintSoon(){
+  clearTimeout(hintTimer);
+  el("hint").style.opacity="1";
+  hintTimer = setTimeout(()=>{ el("hint").style.opacity="0"; }, 6000);
+}
+
+/* =========================================================
+   10. LOOP
+   ========================================================= */
+addEventListener("resize", ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(()=>{
+  const dt = Math.min(clock.getDelta(), 0.05);
+  stepSwing(dt);
+  if(renderer.xr.isPresenting){ camRig.rotation.y = 0; stepGloves(dt); }
+  else camRig.rotation.y = yaw;
+
+  // lit zone breathes so it reads at a glance
+  const t = performance.now()*0.004;
+  zoneMeshes.forEach(m=>{
+    const on = m.userData.state==="now";
+    const s = on ? 1 + Math.sin(t)*0.06 : 1;
+    m.scale.set(s,s,1);
+  });
+
+  for(let i=pops.length-1;i>=0;i--){
+    const p = pops[i]; p.t += dt;
+    p.sp.position.y += dt*0.45;
+    p.sp.material.opacity = Math.max(0, 1 - p.t/1.1);
+    if(p.t>1.1){ scene.remove(p.sp); p.sp.material.map.dispose(); p.sp.material.dispose(); pops.splice(i,1); }
+  }
+  renderer.render(scene,camera);
+});
+
+loadCombo(S.seq, S.name);
+hideHintSoon();
+})();
+</script>
+</body>
+</html>
