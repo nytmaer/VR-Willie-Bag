@@ -9,7 +9,8 @@
 
 ## 0. Changes since handoff
 
-- **Reset in VR (fixes the P0 dead-end).** After a fail the "Run it again" control lived only on the DOM `#over` overlay, invisible inside an immersive session — the owner hit a wrong hand in VR and was stuck. Either controller **trigger** now restarts the combo when the round is dead, and the 3D panel prompts "pull either trigger to run it again". `selectstart` handlers in §8.
+- **VR never dead-ends now (fixes the P0 lockout).** The "Run it again" control lived only on the DOM `#over` overlay, invisible inside an immersive session — the owner hit a wrong hand in VR and was stuck. The fail rule is unchanged (wrong punch still ends the round), but in VR the bag stays live: **any punch, or a trigger pull, instantly restarts the combo** (`stepGloves` restarts on a hit when `!S.alive`; `selectstart` restarts too). Panel prompt updated.
+- **In-VR options menu (§8b).** DOM Drills/Settings are invisible in-headset, so you were locked to your starting drill and settings. Added a floating 3D panel: **grip** toggles it, a controller **laser + trigger** picks. It carries all 9 drills, all 4 settings (kept in sync with the DOM checkboxes), and a Restart button. Rendered as a depth-tested-off overlay so it never buries in the bag; placed 0.5 m in front of the head via `renderer.xr.getCamera`. `?debug=1` + **M** previews it on desktop. Detection is suppressed while it's open.
 - **Gloves are fists now.** Was a bare sphere per hand; now a squashed fist + thumb + wrist wrap + a short forearm running back toward the elbow (`makeGlove`, §8). If the forearm points the wrong way on-device, flip the sign of the `+z` offsets — grip-space forward is device-dependent.
 - **Detection thresholds hoisted (starts T2).** The four P3 magic numbers are now the named `DET` object at the top of §8 (`speed` / `hitR` / `rearmR` / `dir`).
 - **`?debug=1`** — live metrics overlay: fps, thresholds, per-glove peak speed, and last-hit distance. §11.

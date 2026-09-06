@@ -430,7 +430,7 @@ function drawPanel(msg){
     g.font = "700 74px Haettenschweiler, 'Arial Narrow Bold', Impact, sans-serif";
     g.fillText(msg, 512, 194);
     g.fillStyle="#d8c9a0"; g.font = "26px sans-serif";
-    g.fillText("pull either trigger to run it again", 512, 250);
+    g.fillText("hit the bag or pull a trigger to go again  ·  grip for options", 512, 250);
   } else {
     const n = S.seq.length, w = Math.min(112, 940/Math.max(n,1)), gap = w*0.14;
     const total = n*w + (n-1)*gap, x0 = 512 - total/2;
@@ -650,15 +650,29 @@ function makeGlove(hand){
 }
 
 const gloves = [];
+const controllerObjs = [];
 for(let i=0;i<2;i++){
   const hand = i===0 ? "L" : "R";
   const g = renderer.xr.getControllerGrip(i);
   g.add(makeGlove(hand));
   scene.add(g);
-  // The trigger is the in-headset "run it again" — no need to remove the headset to restart.
+
   const ctrl = renderer.xr.getController(i);
-  ctrl.addEventListener("selectstart", ()=>{ if(!S.alive) loadCombo(S.seq, S.name); });
+  // aim laser, shown only while the options menu is open
+  const laser = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]),
+    new THREE.LineBasicMaterial({color:0xc9a227})
+  );
+  laser.name = "laser"; laser.visible = false; ctrl.add(laser);
+  // trigger: click the menu if it's open, otherwise "run it again" when the round is dead
+  ctrl.addEventListener("selectstart", ()=>{
+    if(menuOpen){ const b = menuPick(ctrl); if(b) b.userData.action(); return; }
+    if(!S.alive) loadCombo(S.seq, S.name);
+  });
+  // grip: open / close the options menu
+  ctrl.addEventListener("squeezestart", toggleMenu);
   scene.add(ctrl);
+  controllerObjs.push(ctrl);
   gloves.push({obj:g, prev:new THREE.Vector3(), vel:new THREE.Vector3(), armed:true, hand:hand, init:false, peak:0});
 }
 renderer.xr.addEventListener("sessionstart", ()=>{
@@ -677,6 +691,7 @@ function stepGloves(dt){
     g.prev.copy(p);
     const speed = g.vel.length();
     if(DBG) g.peak = Math.max(g.peak, speed);
+    if(menuOpen) return;   // pointing at the menu, not throwing
 
     let near = false;
     for(const m of zoneMeshes){
@@ -687,6 +702,7 @@ function stepGloves(dt){
         const nrm = m.userData.normal.clone().applyQuaternion(pivot.quaternion);
         if(g.vel.dot(nrm) < DET.dir){
           g.armed = false;
+          if(!S.alive){ loadCombo(S.seq, S.name); break; }   // dead round → any punch brings the bag back
           if(DBG){ dbgLast = {hand:g.hand, n:m.userData.n, speed:speed, dist:d}; g.peak = 0; }
           punch(m.userData.n, zp.clone(), nrm, g.hand);
           break;
@@ -696,6 +712,143 @@ function stepGloves(dt){
     if(!g.armed && !near) g.armed = true;
   });
 }
+
+/* =========================================================
+   8b. VR OPTIONS MENU  — grip toggles it, trigger clicks it
+   ========================================================= */
+let menuOpen = false;
+const menuGroup = new THREE.Group();
+menuGroup.visible = false;
+scene.add(menuGroup);
+const menuButtons = [];
+const menuRay = new THREE.Raycaster();
+const _rot = new THREE.Matrix4();
+let lastHoverKey = "";
+
+// a reticle per controller, sitting where its laser meets the panel
+const reticles = [0,1].map(()=>{
+  const r = new THREE.Mesh(new THREE.SphereGeometry(0.008,10,8),
+    new THREE.MeshBasicMaterial({color:0xfff3cf, depthTest:false}));
+  r.renderOrder = 12; r.visible = false; scene.add(r); return r;
+});
+
+// settings the menu can toggle, kept in sync with the DOM checkboxes
+const settingDefs = [
+  {key:"call",       label:"Call",     dom:"optCall"},
+  {key:"blind",      label:"Blind",    dom:"optBlind", after:()=>renderCall()},
+  {key:"checkHands", label:"Hand chk", dom:"optHands"},
+  {key:"southpaw",   label:"Southpaw", dom:"optSouth"}
+];
+
+function roundRect(c,x,y,w,h,r){
+  c.beginPath(); c.moveTo(x+r,y);
+  c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r);
+  c.arcTo(x,y+h,x,y,r);     c.arcTo(x,y,x+w,y,r); c.closePath();
+}
+// A menu button: a small textured plane that redraws on hover / active state.
+function menuButton(x,y,w,h,getLabel,action,getActive){
+  const cw = Math.round(w*640), ch = Math.round(h*640);
+  const cv = document.createElement("canvas"); cv.width=cw; cv.height=ch;
+  const cx = cv.getContext("2d");
+  const tex = new THREE.CanvasTexture(cv); tex.anisotropy = 4;
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w,h),
+    new THREE.MeshBasicMaterial({map:tex, transparent:true, depthTest:false}));
+  mesh.position.set(x,y,0.001); mesh.renderOrder = 11;
+  mesh.userData = {hover:false, action, draw};
+  function draw(){
+    const hov = mesh.userData.hover, act = getActive && getActive();
+    cx.clearRect(0,0,cw,ch);
+    cx.fillStyle = hov ? "#c9a227" : (act ? "#3a3117" : "#1b1813");
+    roundRect(cx,3,3,cw-6,ch-6,Math.min(cw,ch)*0.2); cx.fill();
+    cx.lineWidth = 4; cx.strokeStyle = hov ? "#f7e6a0" : (act ? "#c9a227" : "#3d372d"); cx.stroke();
+    cx.fillStyle = hov ? "#191510" : "#efe7d6";
+    cx.textAlign="center"; cx.textBaseline="middle";
+    let fs = Math.floor(ch*0.44), label = getLabel();
+    cx.font = "700 "+fs+"px Haettenschweiler,'Arial Narrow Bold',Impact,sans-serif";
+    while(cx.measureText(label).width > cw*0.9 && fs > 9){ fs-=2; cx.font = "700 "+fs+"px Haettenschweiler,'Arial Narrow Bold',Impact,sans-serif"; }
+    cx.fillText(label, cw/2, ch/2+2);
+    tex.needsUpdate = true;
+  }
+  draw();
+  menuGroup.add(mesh); menuButtons.push(mesh);
+  return mesh;
+}
+function buildMenu(){
+  const bg = new THREE.Mesh(new THREE.PlaneGeometry(1.26,1.04),
+    new THREE.MeshBasicMaterial({color:0x0c0a09, transparent:true, opacity:0.96, depthTest:false}));
+  bg.position.z = -0.004; bg.renderOrder = 10; menuGroup.add(bg);
+  // title strip
+  const tcv = document.createElement("canvas"); tcv.width=1024; tcv.height=128;
+  const tcx = tcv.getContext("2d");
+  tcx.fillStyle="#c9a227"; tcx.textAlign="left"; tcx.textBaseline="middle";
+  tcx.font="700 84px Haettenschweiler,'Arial Narrow Bold',Impact,sans-serif";
+  tcx.fillText("OPTIONS", 12, 72);
+  const tm = new THREE.Mesh(new THREE.PlaneGeometry(0.5,0.0625),
+    new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(tcv), transparent:true, depthTest:false}));
+  tm.position.set(-0.35,0.45,0.001); tm.renderOrder = 11; menuGroup.add(tm);
+
+  menuButton(-0.30,0.35,0.52,0.11, ()=>"RESTART COMBO", ()=>{ loadCombo(S.seq,S.name); closeMenu(); });
+  menuButton( 0.35,0.35,0.28,0.11, ()=>"CLOSE", ()=>closeMenu());
+
+  const gx=[-0.40,0,0.40], gy=[0.16,0.02,-0.12];
+  DRILLS.forEach((d,i)=>{
+    menuButton(gx[i%3], gy[Math.floor(i/3)], 0.38,0.11,
+      ()=>d.seq.join("-"), ()=>{ loadCombo(d.seq,d.name); closeMenu(); }, ()=>S.name===d.name);
+  });
+
+  const sx=[-0.31,0.31], sy=[-0.28,-0.40];
+  settingDefs.forEach((def,i)=>{
+    menuButton(sx[i%2], sy[Math.floor(i/2)], 0.58,0.10,
+      ()=>def.label+"  "+(S[def.key]?"ON":"off"),
+      ()=>{ S[def.key]=!S[def.key]; const c=el(def.dom); if(c) c.checked=S[def.key]; if(def.after) def.after(); redrawMenu(); },
+      ()=>S[def.key]);
+  });
+}
+function redrawMenu(){ menuButtons.forEach(b=>b.userData.draw()); }
+
+function placeMenu(){
+  const cam = (renderer.xr.isPresenting && renderer.xr.getCamera) ? renderer.xr.getCamera(camera) : camera;
+  const hp = cam.getWorldPosition(new THREE.Vector3());
+  const fwd = cam.getWorldDirection(new THREE.Vector3()); fwd.y = 0;
+  if(fwd.lengthSq() < 1e-4) fwd.set(0,0,-1);
+  fwd.normalize();
+  const pos = hp.clone().addScaledVector(fwd, 0.5); pos.y = hp.y - 0.05;
+  menuGroup.position.copy(pos);
+  menuGroup.lookAt(hp);   // panel front (+Z) faces the player, text upright
+  menuGroup.updateMatrixWorld(true);
+}
+function setLasers(on){
+  controllerObjs.forEach(c=>{ const l=c.getObjectByName("laser"); if(l) l.visible=on; });
+  if(!on) reticles.forEach(r=>r.visible=false);
+}
+function openMenu(){ menuOpen=true; placeMenu(); redrawMenu(); menuGroup.visible=true; setLasers(true); }
+function closeMenu(){ menuOpen=false; menuGroup.visible=false; setLasers(false); }
+function toggleMenu(){ menuOpen ? closeMenu() : openMenu(); }
+
+function aimFrom(ctrl){
+  _rot.extractRotation(ctrl.matrixWorld);
+  menuRay.ray.origin.setFromMatrixPosition(ctrl.matrixWorld);
+  menuRay.ray.direction.set(0,0,-1).applyMatrix4(_rot).normalize();
+  return menuRay.intersectObjects(menuButtons, false);
+}
+function menuPick(ctrl){ const h = aimFrom(ctrl); return h.length ? h[0].object : null; }
+function updateMenu(){
+  menuButtons.forEach(b=>b.userData.hover=false);
+  controllerObjs.forEach((ctrl,i)=>{
+    const hits = aimFrom(ctrl);
+    const l = ctrl.getObjectByName("laser");
+    if(hits.length){
+      hits[0].object.userData.hover = true;
+      reticles[i].visible = true; reticles[i].position.copy(hits[0].point);
+      if(l) l.scale.z = hits[0].distance/5;
+    } else {
+      reticles[i].visible = false; if(l) l.scale.z = 1;
+    }
+  });
+  const key = menuButtons.map(b=>b.userData.hover?"1":"0").join("");
+  if(key !== lastHoverKey){ lastHoverKey = key; redrawMenu(); }
+}
+buildMenu();
 
 /* =========================================================
    9. UI WIRING
@@ -814,7 +967,7 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(()=>{
   const dt = Math.min(clock.getDelta(), 0.05);
   stepSwing(dt);
-  if(renderer.xr.isPresenting){ camRig.rotation.y = 0; stepGloves(dt); }
+  if(renderer.xr.isPresenting){ camRig.rotation.y = 0; stepGloves(dt); if(menuOpen) updateMenu(); }
   else camRig.rotation.y = yaw;
 
   // lit zone breathes so it reads at a glance
@@ -893,6 +1046,13 @@ function runTests(){
   document.body.appendChild(box);
 }
 if(TEST) runTests();
+
+// ?debug: preview the VR options menu on desktop (press M to toggle; it's placed
+// in front of the flat camera). VR uses the grip button — this is a headless preview.
+if(DBG){
+  addEventListener("keydown", e=>{ if(e.key==="m"||e.key==="M") toggleMenu(); });
+  window.__willie = {toggleMenu, openMenu, closeMenu, menuGroup, scene, camera, get menuOpen(){return menuOpen;}};
+}
 
 loadCombo(S.seq, S.name);
 hideHintSoon();

@@ -75,7 +75,9 @@ Serve over **https** (GitHub Pages once public, or `npx serve` + `npx cloudflare
 - [ ] A real punch registers; a slow reach does **not**
 - [ ] Wrong **number** ends the round; the 3D panel reads `OUT`
 - [ ] Wrong **hand** ends the round (hand check on, orthodox)
-- [ ] **Reset works in-headset:** after a fail, the panel says "pull either trigger to run it again" and a trigger restarts the combo — no need to remove the headset *(the bug that prompted this pass)*
+- [ ] **Bag never dead-ends:** after a fail, throwing another punch — or pulling a trigger — instantly restarts the combo. No frozen screen, no removing the headset *(the bug that prompted this pass)*
+- [ ] **Options menu:** the **grip** button opens a floating panel; a controller **laser + trigger** selects. Switch to another drill from it; toggle each setting (call / blind / hand-check / southpaw) and see it take effect; the **Restart** button restarts; **Close** (or grip again) dismisses it
+- [ ] While the menu is open, throwing does **not** fail the round (you're pointing, not punching)
 - [ ] A full `7-7-5-1-2-1` can be completed in VR
 - [ ] fps holds 72 (or 90) — check the `?debug=1` readout; watch for hitches when zones change state
 
@@ -99,4 +101,4 @@ Serve over **https** (GitHub Pages once public, or `npx serve` + `npx cloudflare
 |-----|------|
 | `index.html`          | Normal play |
 | `index.html?test`     | Run the logic self-test, show a PASS/FAIL report |
-| `index.html?debug=1`  | Live detection-metrics overlay (peak speed, trigger distance, fps) |
+| `index.html?debug=1`  | Live detection-metrics overlay; also press **M** to preview the VR options menu on desktop |
