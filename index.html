@@ -150,6 +150,9 @@
 (function(){
 "use strict";
 
+const DBG  = /[?&]debug=1/.test(location.search);  // ?debug=1 → live detection metrics overlay
+const TEST = /[?&]test\b/.test(location.search);   // ?test    → headless logic self-test
+
 /* =========================================================
    1. THE SYSTEM
    ========================================================= */
@@ -425,7 +428,9 @@ function drawPanel(msg){
   if(msg){
     g.textAlign="center"; g.fillStyle="#ff8b7f";
     g.font = "700 74px Haettenschweiler, 'Arial Narrow Bold', Impact, sans-serif";
-    g.fillText(msg, 512, 210);
+    g.fillText(msg, 512, 194);
+    g.fillStyle="#d8c9a0"; g.font = "26px sans-serif";
+    g.fillText("pull either trigger to run it again", 512, 250);
   } else {
     const n = S.seq.length, w = Math.min(112, 940/Math.max(n,1)), gap = w*0.14;
     const total = n*w + (n-1)*gap, x0 = 512 - total/2;
@@ -543,6 +548,12 @@ function fail(reason){
   try{ speechSynthesis.cancel(); }catch(e){}
 }
 
+// Which hand a number wants, accounting for the southpaw mirror. Pure — tested by ?test.
+function neededHand(n){
+  const h = PUNCH[n].hand;
+  return S.southpaw ? (h==="L" ? "R" : "L") : h;
+}
+
 function punch(n, worldPos, normal, hand){
   if(!S.alive) return;
   const want = S.seq[S.idx];
@@ -551,8 +562,7 @@ function punch(n, worldPos, normal, hand){
     return;
   }
   if(hand && S.checkHands){
-    let need = PUNCH[n].hand;
-    if(S.southpaw) need = need==="L" ? "R" : "L";
+    const need = neededHand(n);
     if(need !== hand){
       fail("<b>"+n+"</b> is a "+(need==="L"?"left":"right")+" hand.<br>You threw it with your "+(hand==="L"?"left":"right")+".");
       return;
@@ -609,22 +619,55 @@ addEventListener("keydown", e=>{
 /* =========================================================
    8. INPUT — VR gloves
    ========================================================= */
+// Punch-detection thresholds. These are guesses until tuned on real punches —
+// open the page with ?debug=1 to watch peak velocity and trigger distance live.
+const DET = {
+  speed:  1.1,    // m/s — minimum glove speed to count as a punch
+  hitR:   0.135,  // m   — glove must be this close to a zone centre
+  rearmR: 0.17,   // m   — glove must leave this radius before it can punch again
+  dir:   -0.35    // glove must be travelling INTO the bag (vel · zone-normal)
+};
+
+// A boxing glove: knuckles at the grip origin, a wrist wrap and a short forearm
+// running back toward the elbow. (If the forearm points the wrong way in-headset,
+// flip the sign of the +z offsets below — grip-space forward is device-dependent.)
+function makeGlove(hand){
+  const grp  = new THREE.Group();
+  const skin = new THREE.MeshStandardMaterial({color: hand==="L"?0x9d2f2a:0x2f4a9d, roughness:0.55});
+  const wrap = new THREE.MeshStandardMaterial({color:0x2b2620, roughness:0.85});
+  const arm  = new THREE.MeshStandardMaterial({color:0x3a332b, roughness:0.9});
+
+  const fist = new THREE.Mesh(new THREE.SphereGeometry(0.055,18,14), skin);
+  fist.scale.set(1.0,0.82,1.15);                       // squashed like a closed fist
+  grp.add(fist);
+  const thumb = new THREE.Mesh(new THREE.SphereGeometry(0.022,12,10), skin);
+  thumb.position.set(hand==="L"?0.045:-0.045, 0.008, 0.02); grp.add(thumb);
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.037,0.041,0.05,16), wrap);
+  band.rotation.x = Math.PI/2; band.position.z = 0.075; grp.add(band);
+  const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.034,0.03,0.17,14), arm);
+  forearm.rotation.x = Math.PI/2; forearm.position.z = 0.18; grp.add(forearm);
+  return grp;
+}
+
 const gloves = [];
 for(let i=0;i<2;i++){
+  const hand = i===0 ? "L" : "R";
   const g = renderer.xr.getControllerGrip(i);
-  const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.062,16,12),
-    new THREE.MeshStandardMaterial({color:i===0?0x9d2f2a:0x2f4a9d, roughness:0.5})
-  );
-  g.add(mesh);
+  g.add(makeGlove(hand));
   scene.add(g);
-  gloves.push({obj:g, prev:new THREE.Vector3(), vel:new THREE.Vector3(), armed:true, hand:i===0?"L":"R", init:false});
+  // The trigger is the in-headset "run it again" — no need to remove the headset to restart.
+  const ctrl = renderer.xr.getController(i);
+  ctrl.addEventListener("selectstart", ()=>{ if(!S.alive) loadCombo(S.seq, S.name); });
+  scene.add(ctrl);
+  gloves.push({obj:g, prev:new THREE.Vector3(), vel:new THREE.Vector3(), armed:true, hand:hand, init:false, peak:0});
 }
 renderer.xr.addEventListener("sessionstart", ()=>{
   audio();
-  gloves.forEach(g=>g.init=false);
+  gloves.forEach(g=>{ g.init=false; g.peak=0; });
   document.body.style.background = "#000";
 });
+
+let dbgLast = null;   // {hand,n,speed,dist} of the last registered VR punch, for ?debug
 function stepGloves(dt){
   const zp = new THREE.Vector3();
   gloves.forEach(g=>{
@@ -633,16 +676,18 @@ function stepGloves(dt){
     g.vel.subVectors(p,g.prev).divideScalar(Math.max(dt,0.0001));
     g.prev.copy(p);
     const speed = g.vel.length();
+    if(DBG) g.peak = Math.max(g.peak, speed);
 
     let near = false;
     for(const m of zoneMeshes){
       m.getWorldPosition(zp);
       const d = zp.distanceTo(p);
-      if(d < 0.17) near = true;
-      if(g.armed && d < 0.135 && speed > 1.1){
+      if(d < DET.rearmR) near = true;
+      if(g.armed && d < DET.hitR && speed > DET.speed){
         const nrm = m.userData.normal.clone().applyQuaternion(pivot.quaternion);
-        if(g.vel.dot(nrm) < -0.35){
+        if(g.vel.dot(nrm) < DET.dir){
           g.armed = false;
+          if(DBG){ dbgLast = {hand:g.hand, n:m.userData.n, speed:speed, dist:d}; g.peak = 0; }
           punch(m.userData.n, zp.clone(), nrm, g.hand);
           break;
         }
@@ -685,9 +730,10 @@ el("btnMenu").onclick = ()=>{ audio(); openPanel(); };
 el("btnClose").onclick = closePanel;
 el("btnRestart").onclick = ()=>{ audio(); loadCombo(S.seq, S.name); };
 el("btnAgain").onclick = ()=>{ loadCombo(S.seq, S.name); };
+// Pull the digits 1–8 out of any separator soup. Pure — tested by ?test.
+function parseCombo(raw){ return (String(raw).match(/[1-8]/g)||[]).map(Number); }
 el("btnCustom").onclick = ()=>{
-  const raw = el("custom").value;
-  const seq = (raw.match(/[1-8]/g)||[]).map(Number);
+  const seq = parseCombo(el("custom").value);
   if(!seq.length){ el("custom").value=""; el("custom").placeholder="Digits 1–8 only, e.g. 7-7-5-1-2-1"; return; }
   S.saved.unshift(seq); S.saved = S.saved.slice(0,6);
   renderSaved();
@@ -785,8 +831,68 @@ renderer.setAnimationLoop(()=>{
     p.sp.material.opacity = Math.max(0, 1 - p.t/1.1);
     if(p.t>1.1){ scene.remove(p.sp); p.sp.material.map.dispose(); p.sp.material.dispose(); pops.splice(i,1); }
   }
+  if(DBG){ fpsN++; fpsT+=dt; if(fpsT>=0.5){ fps=fpsN/fpsT; fpsN=0; fpsT=0; } updateDebug(); }
   renderer.render(scene,camera);
 });
+
+/* =========================================================
+   11. DEBUG METRICS  (?debug=1)
+   ========================================================= */
+let dbgBox=null, fps=0, fpsN=0, fpsT=0;
+if(DBG){
+  dbgBox = document.createElement("div");
+  dbgBox.style.cssText = "position:fixed;left:8px;bottom:8px;z-index:40;pointer-events:none;"+
+    "font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:#9dff9f;"+
+    "background:rgba(0,0,0,.62);border:1px solid #2a3a2a;padding:8px 10px;white-space:pre;max-width:70vw";
+  document.body.appendChild(dbgBox);
+}
+function updateDebug(){
+  if(!dbgBox) return;
+  const L = gloves[0]?gloves[0].peak:0, R = gloves[1]?gloves[1].peak:0, h = dbgLast;
+  dbgBox.textContent =
+    "WILLIE debug   fps "+fps.toFixed(0)+(renderer.xr.isPresenting?"   [VR]":"   [flat — punch detection is VR-only]")+"\n"+
+    "thresholds   speed>"+DET.speed+"   hitR "+DET.hitR+"m   rearmR "+DET.rearmR+"m   dir "+DET.dir+"\n"+
+    "peak speed   L "+L.toFixed(2)+"   R "+R.toFixed(2)+" m/s\n"+
+    "last hit     "+(h ? (h.hand+"  n"+h.n+"   "+h.speed.toFixed(2)+" m/s  @ "+(h.dist*100).toFixed(1)+" cm") : "—");
+}
+
+/* =========================================================
+   12. SELF-TEST  (?test) — headless, no headset needed
+   ========================================================= */
+function runTests(){
+  const R = [];
+  const eq = (name,got,want)=> R.push({name, pass: JSON.stringify(got)===JSON.stringify(want), got, want});
+  const ok = (name,cond)=>    R.push({name, pass: !!cond});
+
+  // numbering integrity
+  ok("8 numbers defined",           Object.keys(PUNCH).length===8 && ZONES.length===8);
+  eq("8 (jab body) is a lead hand", PUNCH[8].hand, "L");   // the non-obvious one
+  eq("2 (right) is a rear hand",    PUNCH[2].hand, "R");
+
+  // neededHand + southpaw mirror
+  const sp = S.southpaw;
+  S.southpaw=false; eq("orthodox: 2 needs R", neededHand(2), "R"); eq("orthodox: 8 needs L", neededHand(8), "L");
+  S.southpaw=true;  eq("southpaw: 2 needs L", neededHand(2), "L"); eq("southpaw: 8 needs R", neededHand(8), "R");
+  S.southpaw=sp;
+
+  // custom-combo parser
+  eq("parse peek-a-boo",   parseCombo("7-7-5-1-2-1"), [7,7,5,1,2,1]);
+  eq("parse mixed seps",   parseCombo("7 2,1"),        [7,2,1]);
+  eq("parse strips junk",  parseCombo("a9x2b0"),       [2]);   // 9 and 0 are not punches
+  eq("parse empty",        parseCombo("nope"),         []);
+
+  const pass = R.filter(r=>r.pass).length, fail = R.length-pass;
+  console.log("[willie test] "+pass+"/"+R.length+" passed", R);
+  const box = document.createElement("div");
+  box.style.cssText = "position:fixed;inset:0;z-index:100;overflow:auto;background:#0c0a09;color:#e8e6df;"+
+    "font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;padding:22px";
+  box.innerHTML = "<div style='font:700 20px sans-serif;color:"+(fail?"#e5544b":"#59d98a")+"'>WILLIE self-test — "+
+    pass+"/"+R.length+" passed"+(fail?(" · "+fail+" FAILED"):"")+"</div><br>"+
+    R.map(r=> (r.pass?"<span style='color:#59d98a'>PASS</span>":"<span style='color:#e5544b'>FAIL</span>")+
+      "  "+r.name+(r.pass?"":("   got "+JSON.stringify(r.got)+"  want "+JSON.stringify(r.want)))).join("<br>");
+  document.body.appendChild(box);
+}
+if(TEST) runTests();
 
 loadCombo(S.seq, S.name);
 hideHintSoon();

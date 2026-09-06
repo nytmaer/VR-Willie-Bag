@@ -2,10 +2,21 @@
 
 **Repo:** github.com/nytmaer/VR-Willie-Bag (private until launch)
 **Owner:** nytmaer
-**State:** v1 prototype, feature-complete on flat screen, **never successfully entered a VR session yet**
+**State:** v1 prototype, feature-complete on flat screen; a VR session has now run on-device (wrong-hand fail fired), but T1 is not yet fully signed off
 **Date of handoff:** September 2026
 
 ---
+
+## 0. Changes since handoff
+
+- **Reset in VR (fixes the P0 dead-end).** After a fail the "Run it again" control lived only on the DOM `#over` overlay, invisible inside an immersive session — the owner hit a wrong hand in VR and was stuck. Either controller **trigger** now restarts the combo when the round is dead, and the 3D panel prompts "pull either trigger to run it again". `selectstart` handlers in §8.
+- **Gloves are fists now.** Was a bare sphere per hand; now a squashed fist + thumb + wrist wrap + a short forearm running back toward the elbow (`makeGlove`, §8). If the forearm points the wrong way on-device, flip the sign of the `+z` offsets — grip-space forward is device-dependent.
+- **Detection thresholds hoisted (starts T2).** The four P3 magic numbers are now the named `DET` object at the top of §8 (`speed` / `hitR` / `rearmR` / `dir`).
+- **`?debug=1`** — live metrics overlay: fps, thresholds, per-glove peak speed, and last-hit distance. §11.
+- **`?test`** — headless logic self-test (numbering, hand check + southpaw, custom parser). §12. Green as of this change.
+- **New files:** `TESTING.md` (the three-layer test plan and on-device checklist).
+
+Still open on T1: bag height / reference-space (P2), glove-orientation confirmation, and the detection tuning itself (P3/T2) — all need eyes in the headset.
 
 ## 1. What this is
 
@@ -33,8 +44,11 @@ Southpaw setting mirrors the hand column only, not the numbers.
 ## 2. Repo contents
 
 ```
-index.html    the entire application, ~32 kB, no build step
-README.md     public-facing description
+index.html      the entire application, no build step
+README.md       public-facing description
+HANDOFF.md      this file
+TESTING.md      three-layer test plan + on-device checklist
+.gitattributes  normalize line endings to LF
 ```
 
 That's it. There is no package.json, no bundler, no node_modules. `index.html` loads three.js **r128 from cdnjs** via a single `<script>` tag and does everything else inline.
