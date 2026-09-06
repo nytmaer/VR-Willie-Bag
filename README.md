@@ -60,4 +60,4 @@ Open the printed `https://…trycloudflare.com` URL in the headset.
 
 ## Built with
 
-three.js r128, WebXR, Web Audio API. One file, about 32 kB.
+three.js r128, WebXR, Web Audio API. One file, about 38 kB.
